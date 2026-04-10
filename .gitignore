@@ -1,8 +1,6 @@
 facebook/
 results/
 models/
-<<<<<<< HEAD
+emo2vec_large_features/
+hubert_large_features/
 .DS_Store
-=======
-Features/
->>>>>>> nums-gating

@@ -1,83 +1,71 @@
-import torch
-import numpy as np
-from transformers import Wav2Vec2Processor, HubertModel
 import os
-from tqdm import tqdm
-import argparse
-from pathlib import Path
+import torch
 import librosa
+from pathlib import Path
+from tqdm import tqdm
+from transformers import Wav2Vec2FeatureExtractor, HubertModel
 
-class HubertExtractor:
-    def __init__(self, hubert_path):
-        """初始化HuBERT特征提取器"""
-        self.processor = Wav2Vec2Processor.from_pretrained(hubert_path, local_files_only=True)
-        self.model = HubertModel.from_pretrained(hubert_path, local_files_only=True).cuda()
-        self.model.eval()
+def batch_extract_and_save(input_dir, output_dir):
+    # 1. 准备目录与文件列表
+    input_path = Path(input_dir)
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True) # 如果输出目录不存在则创建
 
-    @torch.no_grad()
-    def extract_features(self, audio_path):
-        """从音频文件提取HuBERT特征"""
-        # 直接使用librosa加载音频，自动处理多种采样率
-        wav, sr = librosa.load(audio_path, sr=None, mono=True)
-        
-        # 调整采样率以适应模型需求
-        if sr != 16000:
-            wav = librosa.resample(wav, orig_sr=sr, target_sr=16000)
-            
-        # 预处理音频并提取特征
-        inputs = self.processor(wav, sampling_rate=16000, return_tensors="pt").to('cuda')
-        outputs = self.model(**inputs)
-        
-        return outputs.last_hidden_state.squeeze(0).cpu().numpy()
+    # 支持的音频格式，可自行添加
+    valid_extensions = {'.wav', '.mp3', '.flac'}
+    audio_files = [f for f in input_path.rglob('*') if f.suffix.lower() in valid_extensions]
 
-def extract_and_save_features(args):
-    """提取所有音频的特征并保存"""
-    extractor = HubertExtractor(args.hubert_path)
-    wav_files = list(Path(args.audio_dir).rglob("*.wav"))
-    os.makedirs(args.output_dir, exist_ok=True)
+    if not audio_files:
+        print(f"在 {input_dir} 下未找到音频文件。")
+        return
+
+    # 2. 初始化模型与设备 (移出循环，避免重复加载)
+    print("正在加载 HuBERT-large 模型...")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model_name = "facebook/hubert-large-ll60k"
     
-    feature_info = []
+    processor = Wav2Vec2FeatureExtractor.from_pretrained(model_name)
+    model = HubertModel.from_pretrained(model_name).to(device)
+    model.eval()
+
+    # 3. 遍历提取
+    print(f"开始批量提取，共计 {len(audio_files)} 个文件。使用设备: {device}")
     
-    for wav_path in tqdm(wav_files, desc="Extracting features"):
+    for audio_file in tqdm(audio_files, desc="特征提取进度"):
+        # 构建输出文件名 (同名，后缀改为 .pt)
+        output_file = output_path / f"{audio_file.stem}.pt"
+        
+        # 如果文件已存在则跳过 (支持断点续传)
+        if output_file.exists():
+            continue
+
         try:
-            output_path = os.path.join(args.output_dir, f"{wav_path.stem}.npy")
+            # 读取音频
+            speech, sr = librosa.load(audio_file, sr=16000)
             
-            # 跳过已处理文件
-            if os.path.exists(output_path) and not args.force:
-                continue
-            
-            # 提取并保存特征
-            features = extractor.extract_features(str(wav_path))
-            np.save(output_path, features)
-            
-            # 记录信息
-            feature_info.append({
-                'file_name': wav_path.name,
-                'feature_shape': features.shape
-            })
-            
+            # 数据需移动到对应设备 (GPU/CPU)
+            inputs = processor(speech, return_tensors="pt", sampling_rate=16000).to(device)
+
+            # 提取特征
+            with torch.no_grad():
+                outputs = model(**inputs, output_hidden_states=True)
+
+            # 融合第 10 到 15 层
+            target_layers = outputs.hidden_states[10:16]
+            fused_features = torch.mean(torch.stack(target_layers), dim=0).squeeze(0)
+
+            # 转为 float16，移回 CPU 并保存
+            torch.save(fused_features.half().cpu(), output_file)
+
         except Exception as e:
-            print(f"Error processing {wav_path.name}: {e}")
-    
-    # 保存特征信息
-    if feature_info:
-        import pandas as pd
-        pd.DataFrame(feature_info).to_csv(os.path.join(args.output_dir, 'feature_info.csv'), index=False)
-    
-    print(f"Feature extraction completed! Processed {len(feature_info)} files.")
+            print(f"\n[错误] 处理 {audio_file.name} 失败: {str(e)}")
 
-def main():
-    parser = argparse.ArgumentParser(description='Extract HuBERT features from audio files')
-    parser.add_argument('--audio_dir', type=str, default='/home/wangchenhao/Github/Dataset/EMOVO',
-                        help='Directory containing .wav files')
-    parser.add_argument('--hubert_path', type=str, default='./facebook/hubert-large-ls960-ft',
-                        help='Path to local HuBERT model directory')
-    parser.add_argument('--output_dir', type=str, default='./hubert_large_features',
-                        help='Directory to save extracted features')
-    parser.add_argument('--force', action='store_true',
-                        help='Force re-extract features even if they already exist')
-    
-    extract_and_save_features(parser.parse_args())
+    print("\n所有特征处理完毕！")
 
-if __name__ == '__main__':
-    main()
+# 执行代码
+if __name__ == "__main__":
+    # 请替换为你的实际文件夹路径
+    INPUT_DIRECTORY = "/home/victor/DataSet/IEMOCAP"   
+    OUTPUT_DIRECTORY = "/home/victor/Github/DGFF-SER/hubert_large_features" 
+    
+    batch_extract_and_save(INPUT_DIRECTORY, OUTPUT_DIRECTORY)
