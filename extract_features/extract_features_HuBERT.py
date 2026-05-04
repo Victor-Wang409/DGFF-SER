@@ -1,6 +1,7 @@
 import os
 import torch
 import librosa
+import numpy as np
 from pathlib import Path
 from tqdm import tqdm
 from transformers import Wav2Vec2FeatureExtractor, HubertModel
@@ -32,8 +33,8 @@ def batch_extract_and_save(input_dir, output_dir):
     print(f"开始批量提取，共计 {len(audio_files)} 个文件。使用设备: {device}")
     
     for audio_file in tqdm(audio_files, desc="特征提取进度"):
-        # 构建输出文件名 (同名，后缀改为 .pt)
-        output_file = output_path / f"{audio_file.stem}.pt"
+        # 构建输出文件名
+        output_file = output_path / f"{audio_file.stem}.npy"
         
         # 如果文件已存在则跳过 (支持断点续传)
         if output_file.exists():
@@ -54,8 +55,9 @@ def batch_extract_and_save(input_dir, output_dir):
             target_layers = outputs.hidden_states[10:16]
             fused_features = torch.mean(torch.stack(target_layers), dim=0).squeeze(0)
 
-            # 转为 float16，移回 CPU 并保存
-            torch.save(fused_features.half().cpu(), output_file)
+            # 转为 numpy(float16) 并保存
+            features_np = fused_features.cpu().numpy().astype('float16')
+            np.save(output_file, features_np)
 
         except Exception as e:
             print(f"\n[错误] 处理 {audio_file.name} 失败: {str(e)}")

@@ -55,8 +55,6 @@ python main.py \
     --save_dir ./models \
     --epochs 80 \
     --lr 2e-5 \
-    --effective_batch_size 24 \
-    --gradient_accumulation_steps 4 \
     --warmup_epochs 5 \
     --lr_scheduler cosine \
     --min_lr 1e-6
@@ -70,8 +68,6 @@ python main.py \
 - `--save_dir`: 模型保存目录
 - `--epochs`: 训练轮数
 - `--lr`: 初始学习率
-- `--effective_batch_size`: 有效批次大小
-- `--gradient_accumulation_steps`: 梯度累积步数
 - `--warmup_epochs`: 预热轮数
 - `--lr_scheduler`: 学习率调度策略 (cosine/linear/step)
 - `--min_lr`: 最小学习率

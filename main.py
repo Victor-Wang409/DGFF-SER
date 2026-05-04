@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader
 
 from dataset import EmotionDataset
 from trainer_executor import TrainerExecutor
-from util import split_iemocap, split_msppodcast
+from util import split_iemocap
 
 def main():
     """
@@ -73,7 +73,7 @@ def main():
     )
     
     # 基于说话人进行5折交叉验证
-    folds = split_msppodcast(dataset.df)
+    folds = split_iemocap(dataset.df)
     fold_results = []
     
     # 对每个fold进行训练
@@ -110,10 +110,6 @@ def main():
     std_v = np.std([res[0] for res in fold_results])
     std_a = np.std([res[1] for res in fold_results])
     std_d = np.std([res[2] for res in fold_results])
-
-    # [修改 2] 结果统计增加 Accuracy
-    avg_acc = np.mean([res[3] for res in fold_results]) # 假设 res 返回 4 个值
-    std_acc = np.std([res[3] for res in fold_results])
     
     final_results = (
         f"Final Cross-Validation Results\n"
@@ -121,7 +117,6 @@ def main():
         f"Valence: {avg_v:.3f} ± {std_v:.3f}\n"
         f"Arousal: {avg_a:.3f} ± {std_a:.3f}\n"
         f"Dominance: {avg_d:.3f} ± {std_d:.3f}\n"
-        f"Emotion Accuracy: {avg_acc:.3f} ± {std_acc:.3f}\n" # 新增
         f"Overall VAD: {avg_all:.3f}"
     )
     
