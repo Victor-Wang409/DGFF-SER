@@ -74,8 +74,12 @@ class TrainingManager:
 
             # 反向传播与更新
             loss.backward()
+            
+            # [修复 1.1] 梯度裁剪必须夹在 backward 之后，step 之前，对整个模型的参数生效
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            
             optimizer.step()
-            torch.cuda.empty_cache()
+            # [修复 1.3] 已删除会极大拖慢训练速度的 torch.cuda.empty_cache()
 
             # 记录数据
             total_loss += loss.item()

@@ -49,8 +49,14 @@ class LossFactory:
             similarity_matrix = torch.matmul(features, features.T)
             similarity_matrix = torch.clamp(similarity_matrix, min=-1.0, max=1.0)
             
-            # 应用温度缩放并计算log_softmax (对应伪代码中的LogSoftmax(l_pn/τ))
+            # 应用温度缩放
             logits = similarity_matrix / self.temperature
+            
+            # [修复 1.2] 屏蔽对角线元素，防止自身与自身对比引发的捷径 (Shortcut) 漏洞
+            mask = torch.eye(batch_size, dtype=torch.bool, device=features.device)
+            logits.masked_fill_(mask, float('-inf'))
+            
+            # 计算log_softmax
             log_probs = F.log_softmax(logits, dim=1)
             
             # 构建索引矩阵，用于gather操作

@@ -337,10 +337,6 @@ class ModelComponents:
             # 3. 时序处理 - 添加残差连接
             residual_input = self.residual_proj(multi_grained_fusion)
             
-            # 梯度裁剪
-            if self.training:
-                torch.nn.utils.clip_grad_norm_(self.temporal_lstm.parameters(), max_norm=1.0)
-            
             temporal_features, _ = self.temporal_lstm(multi_grained_fusion)
             
             # 添加残差连接
