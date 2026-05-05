@@ -7,7 +7,7 @@ from tqdm import tqdm
 from pathlib import Path
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler
-import umap  # 导入UMAP库
+import umap
 
 # 导入baseline模型定义
 from baseline import VADModel, VADConfig
@@ -125,7 +125,6 @@ def plot_umap(features, labels, label_names, output_dir, n_neighbors=15, min_dis
                 linewidth=0.5
             )
     
-    # plt.title('UMAP 情感特征可视化', fontsize=15)
     plt.legend(
         loc='upper center',
         bbox_to_anchor=(0.5, 1.10),

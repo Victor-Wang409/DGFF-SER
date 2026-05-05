@@ -111,8 +111,6 @@ class TrainerExecutor:
             current_lr = scheduler.get_last_lr()[0]
             logging.info(f"Epoch {epoch+1}")
             logging.info(f"Current learning rate: {current_lr:.2e}")
-            # logging.info(f"Average emotion2vec weight: {metrics['e2v_weight']:.3f}")
-            # logging.info(f"Average hubert weight: {metrics['hub_weight']:.3f}")
             
             # 验证
             val_v, val_a, val_d = TrainingManager.validate_and_test(model, eval_loader, device)
@@ -138,10 +136,6 @@ class TrainerExecutor:
                 f"Val CCC: V={val_v:.3f}, A={val_a:.3f}, D={val_d:.3f} | "
                 f"Avg={val_ccc_avg:.3f}"
             )
-
-            # 测试
-            test_v, test_a, test_d = TrainingManager.validate_and_test(model, test_loader, device)
-            logging.info(f"Test: CCC_v={test_v:.3f}, CCC_a={test_a:.3f}, CCC_d={test_d:.3f}")
             
             # 更新最佳模型
             if val_ccc_avg > best_val_ccc:

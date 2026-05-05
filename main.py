@@ -33,7 +33,7 @@ def main():
     parser.add_argument('--min_delta', type=float, default=0.01)
 
     parser.add_argument('--lr_scheduler', type=str, default='step', choices=['step'], help='Type of learning rate scheduler')
-    parser.add_argument('--lr_decay_step', type=int, default=15, help='Step size for StepLR scheduler')
+    parser.add_argument('--lr_decay_step', type=int, default=10, help='Step size for StepLR scheduler')
     parser.add_argument('--lr_decay_rate', type=float, default=0.5, help='Decay rate for StepLR scheduler')
     
     args = parser.parse_args()
