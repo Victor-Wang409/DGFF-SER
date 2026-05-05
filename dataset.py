@@ -105,12 +105,15 @@ class EmotionDataset(torch.utils.data.Dataset):
         # 调整所有特征到相同长度
         for i in range(len(all_features)):
             if all_features[i].size(0) != target_len:
+                # [修正] 针对语音特征 [seq_len, dim] 的标准插值做法
+                # F.interpolate 期望输入为 [Batch, Channel, Length]
+                x = all_features[i].transpose(0, 1).unsqueeze(0) # [1, dim, seq_len]
                 all_features[i] = F.interpolate(
-                    all_features[i].unsqueeze(0).unsqueeze(0),
+                    x,
                     size=target_len,
                     mode='linear',
-                    align_corners=False
-                ).squeeze(0).squeeze(0)
+                    align_corners=True
+                ).squeeze(0).transpose(0, 1) # [target_len, dim]
         
         result = {
             "id": row['FileName'],

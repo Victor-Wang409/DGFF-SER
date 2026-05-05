@@ -106,11 +106,7 @@ class TrainerExecutor:
             train_loss = metrics['loss']
             
             # 更新学习率
-            if args.lr_scheduler == 'step':
-                scheduler.step()
-            else:
-                for _ in range(num_training_steps):
-                    scheduler.step()
+            scheduler.step()
                     
             # 记录当前学习率
             current_lr = scheduler.get_last_lr()[0]
@@ -183,6 +179,9 @@ class TrainerExecutor:
         # 保存测试结果
         with open(os.path.join(fold_dir, 'test_results.txt'), 'w') as f:
             f.write(f"Test CCC:\nValence: {test_v:.3f}\nArousal: {test_a:.3f}\n"
+                   f"Dominance: {test_d:.3f}\nAverage: {test_ccc_avg:.3f}")
+        
+        return test_v, test_a, test_dst_a:.3f}\n"
                    f"Dominance: {test_d:.3f}\nAverage: {test_ccc_avg:.3f}")
         
         return test_v, test_a, test_d

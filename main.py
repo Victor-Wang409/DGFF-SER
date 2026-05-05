@@ -32,9 +32,7 @@ def main():
     parser.add_argument('--patience', type=int, default=15)
     parser.add_argument('--min_delta', type=float, default=0.01)
 
-    parser.add_argument('--warmup_epochs', type=int, default=5, help='Number of epochs for learning rate warmup')
-    parser.add_argument('--min_lr', type=float, default=1e-6, help='Minimum learning rate') 
-    parser.add_argument('--lr_scheduler', type=str, default='step', choices=['cosine', 'linear', 'step'], help='Type of learning rate scheduler')
+    parser.add_argument('--lr_scheduler', type=str, default='step', choices=['step'], help='Type of learning rate scheduler')
     parser.add_argument('--lr_decay_step', type=int, default=15, help='Step size for StepLR scheduler')
     parser.add_argument('--lr_decay_rate', type=float, default=0.5, help='Decay rate for StepLR scheduler')
     
