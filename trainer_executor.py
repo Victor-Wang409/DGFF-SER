@@ -77,10 +77,9 @@ class TrainerExecutor:
         # 创建模型
         model = VADModelWithGating(config).to(device)
         optimizer = optim.AdamW(model.parameters(), lr=args.lr)
-        num_training_steps = len(train_loader)
         
         # 学习率调度器
-        scheduler = LRSchedulerFactory.create_scheduler(optimizer, args, num_training_steps)
+        scheduler = LRSchedulerFactory.create_scheduler(optimizer, args)
         vad_criterion = LossFactory.CCCLoss()
         contrast_criterion = LossFactory.SupervisedContrastiveLoss(temperature=0.1)
         early_stopping = EarlyStopping(patience=args.patience, min_delta=args.min_delta)
@@ -179,9 +178,6 @@ class TrainerExecutor:
         # 保存测试结果
         with open(os.path.join(fold_dir, 'test_results.txt'), 'w') as f:
             f.write(f"Test CCC:\nValence: {test_v:.3f}\nArousal: {test_a:.3f}\n"
-                   f"Dominance: {test_d:.3f}\nAverage: {test_ccc_avg:.3f}")
-        
-        return test_v, test_a, test_dst_a:.3f}\n"
                    f"Dominance: {test_d:.3f}\nAverage: {test_ccc_avg:.3f}")
         
         return test_v, test_a, test_d
