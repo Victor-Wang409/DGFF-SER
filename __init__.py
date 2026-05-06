@@ -1,5 +1,5 @@
 """
-模块初始化文件
+Module initialization file exporting core framework components
 """
 
 from .early_stopping import EarlyStopping

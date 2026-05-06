@@ -1,96 +1,96 @@
-# 情感语音分析项目
+# DGFF-SER: Dynamic Gated Feature Fusion for Speech Emotion Recognition
 
-这个项目是一个基于深度学习的情感语音分析系统，用于预测语音的Valence-Arousal-Dominance (VAD) 值。项目采用了多模态特征融合的方法，结合了Emotion2Vec和HuBERT特征，通过门控机制和Transformer编码器进行特征提取和预测。
+## 项目简介
 
-## 项目结构
+DGFF-SER 是一个基于深度学习的高级情感语音分析系统，旨在预测语音在 Valence（愉悦度）、Arousal（激活度）和 Dominance（支配度）三个连续情感上的数值。
 
-项目代码按照高内聚低耦合的原则进行了重构，主要包含以下模块：
+*   **多特征融合**：支持同时输入 Emotion2Vec、HuBERT以及 Wav2Vec、Data2Vec（可选）等预训练模型提取的高维语音表征。
+*   **多粒度门控机制 (Multi-Grained Gating)**：将特征分割为多个独立的组，并使用引入了对数温度系数的Softmax门控网络自适应地计算跨模态重要性权重，最后结合双向 LSTM 捕获长程时序依赖。
+*   **双重目标优化**：
+    *   **一致性相关系数损失 (CCC Loss)**：专门针对情感回归任务优化的指标级损失。
+    *   **监督对比学习 (Supervised Contrastive Learning)**：通过非线性投影头，利用离散情感标签拉近同类样本的潜在空间距离，增强模型表征能力。
 
-```
+---
+
+## 目录结构
+
+```text
 .
-├── main.py                    # 主程序入口
-├── __init__.py                # 模块初始化
-├── early_stopping.py          # 早停机制
-├── lr_scheduler.py            # 学习率调度器
-├── data_processor.py          # 数据处理工具
-├── dataset.py                 # 数据集定义
-├── loss_functions.py          # 损失函数
-├── model_components.py        # 模型组件
-├── model.py                   # 模型定义
-├── trainer.py                 # 训练管理
-└── trainer_executor.py        # 训练执行器
+├── baseline.py                 # 基线模型实现
+├── data_processor.py           # 批次数据处理与特征序列零填充对齐
+├── dataset.py                  # 自定义情感数据集类及安全的标签解析
+├── early_stopping.py           # 基于验证集性能的早停防过拟合机制
+├── loss_functions.py           # CCC 损失与严谨的监督对比损失实现
+├── lr_scheduler.py             # 学习率调度策略
+├── main.py                     # 全局配置、参数解析与主程序入口
+├── model_components.py         # 多粒度门控、时序网络与注意力池化等底层组件
+├── model.py                    # VAD 主模型定义、投影头与前向传播逻辑
+├── trainer_executor.py         # 统筹 Fold 级别生命周期、优化器与日志管理
+├── trainer.py                  # 执行单轮训练与测试，实施精准的梯度裁剪
+├── util.py                     # 提供不同数据集的动态划分算法
+├── UMAP.py										  # 高维特征降维与可视化工具
+├── config/                     # 项目配置文件目录
+├── csv_files/                  # 存储各数据集的标注与元数据 CSV
+├── extract_features/           # 调用各种预训练大模型提取底层特征的脚本集
+└── scripts/                    # 批处理 Shell 脚本目录
 ```
 
-## 模块说明
+---
 
-1. **early_stopping.py**: 实现了早停机制，防止模型训练过程中的过拟合。
+## 核心模块说明
 
-2. **lr_scheduler.py**: 提供了多种学习率调度策略，包括余弦调度、线性调度和步长调度。
+*   `main.py`: 程序的唯一入口。负责解析命令行参数、锁定全局随机种子以确保深度学习实验的严谨可复现性，并根据传入的 CSV 文件名动态选择数据集划分策略（例如自动识别 MSP-Podcast 或 IEMOCAP）。
+*   `dataset.py`: 提供 `EmotionDataset` 类。负责加载和配对多种 `.npy` 特征文件，利用 `ast.literal_eval` 安全解析字符串格式的 VAD 标签，并将不同采样率的特征通过严格的插值算法对齐到统一序列长度。
+*   `data_processor.py`: 提供 DataLoader 使用的 `collate_fn`。负责在组装 Batch 时动态计算最大长度，运用零填充将序列整理为规则张量，并生成对应的 Padding Mask。
+*   `model.py` & `model_components.py`: 模型主体。定义了带有多层 Transformer 编码器的 `VADModelWithGating`，以及确保数值稳定性的对数温度参数化多粒度特征融合网、注意力池化层和对比学习专属投影头。
+*   `trainer.py` & `trainer_executor.py`: 模型训练。`trainer_executor.py` 管理的 epoch 循环、学习率步进与最佳模型保存；`trainer.py` 专注于微观计算，在反向传播与优化器更新之间实施关键的梯度裁剪，并计算损失。
+*   `loss_functions.py`: 提供计算相关性指标的 `CCCLoss。
 
-3. **data_processor.py**: 处理批次数据的收集和处理，主要包含DataLoader的collate_fn函数。
+---
 
-4. **dataset.py**: 定义了情感数据集类，负责加载和处理特征数据。
+## 环境要求
 
-5. **loss_functions.py**: 实现了多种损失函数，包括CCC损失和监督对比损失。
+本项目在Ubuntu24.4以及 Python 3.12+ 环境进行测试。
+---
 
-6. **model_components.py**: 包含模型的各种组件，如注意力池化、多头注意力、Transformer编码器和门控特征融合。
+## 运行项目
 
-7. **model.py**: 定义了VAD模型及其配置类。
+### 1. 特征提取
+在训练前，需要使用 `extract_features/` 目录下的脚本为你的音频提取预训练特征：
+```bash
+# 示例：提取 HuBERT 特征
+python extract_features/extract_features_HuBERT.py
+```
 
-8. **trainer.py**: 实现了模型训练和评估的核心功能。
+### 2. 开始训练
+使用 `main.py` 启动训练流水线。提供 Emotion2Vec 和 HuBERT 特征目录以及对应的标注 CSV 文件。程序会基于你提供的随机种子 (`--seed`) 保证结果完全一致。
 
-9. **trainer_executor.py**: 负责整个训练流程的执行，包括数据加载、模型创建、训练评估和结果保存。
-
-10. **main.py**: 主程序入口，解析命令行参数并执行训练流程。
-
-## 使用方法
-
-### 训练模型
-
+**基本训练命令：**
 ```bash
 python main.py \
-    --emotion2vec_dir ./emo2vec_large_features \
-    --hubert_dir ./hubert_large_features \
-    --csv_path ./csv_files/MSP_Podcast.csv \
-    --save_dir ./models \
-    --epochs 80 \
+    --emotion2vec_dir /path/to/emo2vec_features \
+    --hubert_dir /path/to/hubert_features \
+    --csv_path ./csv_files/IEMOCAP.csv \
+    --save_dir ./models/run_001 \
+    --batch_size 16 \
+    --epochs 50 \
     --lr 2e-5 \
-    --warmup_epochs 5 \
-    --lr_scheduler cosine \
-    --min_lr 1e-6
+    --seed 42 \
+    --patience 10
 ```
 
-### 参数说明
+**融合更多特征：**
+如果提取了 Wav2Vec 或 Data2Vec 特征，可以直接通过参数加入融合网络：
+```bash
+python main.py \
+    --emotion2vec_dir /path/to/emo2vec_features \
+    --hubert_dir /path/to/hubert_features \
+    --wav2vec_dir /path/to/wav2vec_features \
+    --csv_path ./csv_files/MSP_Podcast.csv \
+    --save_dir ./models/run_002
+```
 
-- `--emotion2vec_dir`: emotion2vec特征目录
-- `--hubert_dir`: hubert特征目录
-- `--csv_path`: 标注CSV文件路径
-- `--save_dir`: 模型保存目录
-- `--epochs`: 训练轮数
-- `--lr`: 初始学习率
-- `--warmup_epochs`: 预热轮数
-- `--lr_scheduler`: 学习率调度策略 (cosine/linear/step)
-- `--min_lr`: 最小学习率
-
-## 模型架构
-
-模型采用了门控特征融合机制，将Emotion2Vec和HuBERT两种特征进行融合，然后通过Transformer编码器进行特征提取，最后通过注意力池化和全连接层得到预测结果。模型架构如下：
-
-1. **特征融合层**: 使用门控机制融合Emotion2Vec和HuBERT特征
-2. **Transformer编码层**: 多层Transformer编码器进行特征提取
-3. **注意力池化层**: 提取全局特征表示
-4. **输出层**: 预测VAD值
-
-## 训练策略
-
-训练采用了多种优化策略，包括：
-
-1. **梯度累积**: 支持大批次训练
-2. **学习率调度**: 支持多种学习率调度策略
-3. **早停机制**: 防止过拟合
-4. **对比学习**: 提高特征表示的区分性
-5. **交叉验证**: 进行5折交叉验证，提高模型的泛化能力
-
-## 评估指标
-
-模型使用一致性相关系数(CCC)作为评估指标，针对Valence、Arousal和Dominance三个维度分别计算CCC值，并取平均
+### 3. 输出与监控
+*   **日志记录**：训练过程中的 loss 变化、各特征的动态门控权重（例如 `emotion2vec_w`, `hubert_w`）以及验证集的 CCC 指标会实时输出在终端，并持久化到 `--save_dir` 中的 `training.log` 和 `metrics.csv`。
+*   **模型保存**：触发 Early Stopping 或训练结束后，性能最优的模型权重将保存在 `best_model/` 目录下。
+*   **结果分析**：最终的交叉验证平均 CCC 得分或独立测试集得分会保存在 `final_results.txt` 中。

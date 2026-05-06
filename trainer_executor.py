@@ -1,6 +1,6 @@
 """
-训练执行模块
-负责整个训练流程的执行
+Training execution module
+Governs the overall model training workflow and resource allocation
 """
 
 import os
@@ -18,31 +18,14 @@ from trainer import TrainingManager
 
 class TrainerExecutor:
     """
-    训练执行器，负责整个训练流程的执行
+    Trainer executor responsible for driving the full training loop
     """
     @staticmethod
     def train_model(args, fold, fold_dir, dataset, train_idx, eval_idx, test_idx, device):
         """
-        训练单个fold的模型
-        
-        参数:
-            args: 参数配置
-            fold: 当前fold索引
-            fold_dir: fold目录
-            dataset: 数据集
-            train_idx: 训练集索引
-            eval_idx: 验证集索引
-            test_idx: 测试集索引
-            device: 设备
-
-        参数修改:
-            criterion -> vad_criterion (CCC Loss)
-            新增 -> cls_criterion (CrossEntropy Loss)
-            
-        返回:
-            测试结果
+        Train the deep learning model on a single cross validation fold
         """
-        # 创建数据加载器
+        # Create randomized data loaders
         train_loader = DataLoader(
             dataset, 
             batch_size=args.batch_size,
@@ -62,23 +45,23 @@ class TrainerExecutor:
             collate_fn=DataProcessor.collate_fn
         )
         
-        # 配置模型
+        # Configure model architecture
         config = VADConfig(
             emotion2vec_dim=1024,
             hubert_dim=1024,
             hidden_dim=1024,
             num_hidden_layers=4,
             num_groups=8,
-            # 新增特征维度，默认为0表示不使用
+            # Assign zero to disable supplementary feature dimensions
             wav2vec_dim=0,
             data2vec_dim=0
         )
 
-        # 创建模型
+        # Instantiate neural network
         model = VADModelWithGating(config).to(device)
         optimizer = optim.AdamW(model.parameters(), lr=args.lr)
         
-        # 学习率调度器
+        # Initialize learning rate scheduler and loss criteria
         scheduler = LRSchedulerFactory.create_scheduler(optimizer, args)
         vad_criterion = LossFactory.CCCLoss()
         contrast_criterion = LossFactory.SupervisedContrastiveLoss(temperature=0.1)
@@ -87,13 +70,13 @@ class TrainerExecutor:
         best_val_ccc = -float('inf')
         best_model = None
         
-        # 创建性能跟踪文件
+        # Establish performance tracking log
         metrics_file = os.path.join(fold_dir, 'metrics.csv')
         with open(metrics_file, 'w') as f:
             f.write('epoch,train_loss,val_ccc_v,val_ccc_a,val_ccc_d,val_ccc_avg\n')
         
         for epoch in range(args.epochs):
-            # 训练一个epoch
+            # Execute one training epoch
             metrics = TrainingManager.train_one_epoch(
                 model, 
                 optimizer, 
@@ -104,29 +87,29 @@ class TrainerExecutor:
             )
             train_loss = metrics['loss']
             
-            # 更新学习率
+            # Step learning rate scheduler
             scheduler.step()
                     
-            # 记录当前学习率
+            # Record current learning rate
             current_lr = scheduler.get_last_lr()[0]
             logging.info(f"Epoch {epoch+1}")
             logging.info(f"Current learning rate: {current_lr:.2e}")
             
-            # 验证
+            # Evaluate on validation subset
             val_v, val_a, val_d = TrainingManager.validate_and_test(model, eval_loader, device)
             val_ccc_avg = (val_v + val_a + val_d) / 3
             
-            # 保存每个epoch的模型
+            # Prepare epoch specific output directory
             epoch_dir = os.path.join(fold_dir, f'epoch{epoch+1}')
             os.makedirs(epoch_dir, exist_ok=True)
             
-            # 保存模型和配置
+            # Serialize model state and configuration
             model.save_pretrained(epoch_dir, safe_serialization=False)
             
-            # 保存优化器状态
+            # Serialize optimizer parameters
             torch.save(optimizer.state_dict(), os.path.join(epoch_dir, 'optimizer.pt'))
             
-            # 保存训练指标
+            # Append epoch metrics to tracking file
             with open(metrics_file, 'a') as f:
                 f.write(f'{epoch+1},{train_loss:.4f},{val_v:.4f},{val_a:.4f},{val_d:.4f},{val_ccc_avg:.4f}\n')
             
@@ -137,17 +120,17 @@ class TrainerExecutor:
                 f"Avg={val_ccc_avg:.3f}"
             )
             
-            # 更新最佳模型
+            # Update best performing model state
             if val_ccc_avg > best_val_ccc:
                 best_val_ccc = val_ccc_avg
                 best_model = model.state_dict()
-                # 创建并保存最佳模型
+                # Serialize optimal model snapshot
                 best_model_dir = os.path.join(fold_dir, 'best_model')
                 os.makedirs(best_model_dir, exist_ok=True)
                 model.save_pretrained(best_model_dir, safe_serialization=False)
                 logging.info(f"Saved new best model with val_ccc={val_ccc_avg:.3f}")
             
-            # 保存checkpoint以便恢复训练
+            # Serialize training checkpoint for potential resumption
             checkpoint = {
                 'epoch': epoch + 1,
                 'model_state_dict': model.state_dict(),
@@ -158,18 +141,18 @@ class TrainerExecutor:
             }
             torch.save(checkpoint, os.path.join(fold_dir, 'checkpoint.pt'))
             
-            # 早停检查
+            # Check early stopping criterion
             early_stopping(1 - val_ccc_avg)
             if early_stopping.early_stop:
                 logging.info(f"Early stopping triggered at epoch {epoch+1}")
                 break
         
-        # 加载最佳模型进行测试
+        # Load optimal model for final test evaluation
         model.load_state_dict(best_model)
         test_v, test_a, test_d = TrainingManager.validate_and_test(model, test_loader, device)
         test_ccc_avg = (test_v + test_a + test_d) / 3
         
-        # 保存测试结果
+        # Save absolute test results
         with open(os.path.join(fold_dir, 'test_results.txt'), 'w') as f:
             f.write(f"Test CCC:\nValence: {test_v:.3f}\nArousal: {test_a:.3f}\n"
                    f"Dominance: {test_d:.3f}\nAverage: {test_ccc_avg:.3f}")

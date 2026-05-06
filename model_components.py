@@ -1,6 +1,6 @@
 """
-模型组件模块
-包含各种模型组件的实现，增强了门控融合机制
+Model components module
+Contains neural architecture components enhancing feature gating and fusion
 """
 
 import torch
@@ -9,34 +9,24 @@ import torch.nn.functional as F
 
 class ModelComponents:
     """
-    模型组件类，包含各种模型组件的实现
+    Model components namespace housing building blocks for the overarching architecture
     """
     class AttentionPooling(nn.Module):
         """
-        注意力池化，用于提取序列特征的全局表示
+        Attention pooling computing global representations from sequential features
         """
         def __init__(self, hidden_dim):
             """
-            初始化注意力池化
-            
-            参数:
-                hidden_dim: 隐藏层维度
+            Initialize attention pooling layer
             """
             super().__init__()
             self.attention = nn.Linear(hidden_dim, 1)
 
         def forward(self, x, padding_mask=None):
             """
-            前向传播
-            
-            参数:
-                x: 输入特征 [batch_size, seq_len, hidden_dim]
-                padding_mask: 填充掩码
-                
-            返回:
-                池化后的表示
+            Compute attention weights and aggregate temporal features
             """
-            # 计算注意力分数
+            # Calculate attention scores
             attn_weights = self.attention(x)
             attn_weights = attn_weights.squeeze(-1)
 
@@ -50,14 +40,11 @@ class ModelComponents:
 
     class MultiHeadAttention(nn.Module):
         """
-        多头注意力机制
+        Multihead attention mechanism
         """
         def __init__(self, config):
             """
-            初始化多头注意力
-            
-            参数:
-                config: 配置对象
+            Initialize multihead attention dimensions and projections
             """
             super().__init__()
             self.num_heads = config.num_attention_heads
@@ -72,23 +59,16 @@ class ModelComponents:
             
         def forward(self, x, key_padding_mask=None):
             """
-            前向传播
-            
-            参数:
-                x: 输入特征 [batch_size, seq_len, embed_dim]
-                key_padding_mask: 键填充掩码
-                
-            返回:
-                注意力计算结果
+            Execute attention computation across multiple heads
             """
             batch_size, seq_len, embed_dim = x.shape
             
-            # 投影得到query、key、value
+            # Project inputs to queries keys and values
             q = self.q_proj(x).view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
             k = self.k_proj(x).view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
             v = self.v_proj(x).view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
 
-            # 计算注意力分数
+            # Compute raw attention scores
             attn_weights = torch.matmul(q, k.transpose(-2, -1)) * self.scaling
 
             if key_padding_mask is not None:
@@ -99,10 +79,10 @@ class ModelComponents:
 
             attn_weights = torch.softmax(attn_weights, dim=-1)
             
-            # 注意力加权
+            # Apply attention weights to values
             attn = torch.matmul(attn_weights, v)
             
-            # 重塑并投影
+            # Reshape and compute final projection
             attn = attn.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)
             attn = self.out_proj(attn)
             
@@ -110,14 +90,11 @@ class ModelComponents:
 
     class TransformerEncoderLayer(nn.Module):
         """
-        Transformer编码器层
+        Transformer encoder layer block
         """
         def __init__(self, config):
             """
-            初始化Transformer编码器层
-            
-            参数:
-                config: 配置对象
+            Initialize transformer encoder layer subcomponents
             """
             super().__init__()
             self.self_attn = ModelComponents.MultiHeadAttention(config)
@@ -133,23 +110,16 @@ class ModelComponents:
             
         def forward(self, x, padding_mask=None):
             """
-            前向传播
-            
-            参数:
-                x: 输入特征
-                padding_mask: 填充掩码
-                
-            返回:
-                编码后的特征
+            Forward pass through self attention and feedforward networks
             """
-            # 自注意力层
+            # Self attention block with residual connection
             residual = x
             x = self.norm1(x)
             x = self.self_attn(x, padding_mask)
             x = self.dropout(x)
             x = residual + x
             
-            # 前馈网络
+            # Feedforward network block with residual connection
             residual = x
             x = self.norm2(x)
             x = self.linear1(x)
@@ -162,63 +132,58 @@ class ModelComponents:
 
     class GatedFeatureFusion(nn.Module):
         """
-        门控特征融合机制
-        将多粒度融合和时序敏感处理改为串行关系
-        支持2-4种不同类型的输入特征
+        Gated feature fusion mechanism
+        Transforms multi grained and temporal processing into a serial pipeline
         """
         def __init__(self, feature_dims, num_groups=16, dropout_rate=0.1):
             """
-            初始化门控特征融合
-            
-            参数:
-                feature_dims: 字典，包含各特征类型及其维度，如{'emotion2vec': 1024, 'hubert': 1024}
-                num_groups: 多粒度门控的分组数量
-                dropout_rate: dropout比例
+            Initialize gated feature fusion
             """
             super().__init__()
             self.feature_types = list(feature_dims.keys())
             self.feature_dims = feature_dims
             self.num_features = len(self.feature_types)
             self.dropout_rate = dropout_rate
-            self.temperature = nn.Parameter(torch.tensor(0.1))  # 可学习的温度系数
-            # 初始化权重
+            # Initialize logarithmic temperature to ensure scientific constraints via exponential activation
+            self.log_temp = nn.Parameter(torch.log(torch.tensor(0.1)))
+            # Execute weight initialization
             self._init_weights()
             
-            # 验证特征数量满足要求
-            assert 2 <= self.num_features <= 4, f"特征数量必须在2-4之间，当前为{self.num_features}"
+            # Validate feature count criteria
+            assert 2 <= self.num_features <= 4, f"Feature count must be between 2 and 4 but got {self.num_features}"
             
-            # 特征变换和归一化
+            # Feature transformation and normalization modules
             self.feature_transforms = nn.ModuleDict()
             self.feature_norms = nn.ModuleDict()
             
-            # 使用第一个特征的维度作为标准维度
+            # Adopt first feature dimension as standard baseline
             self.standard_dim = list(feature_dims.values())[0]
             
-            # 为每种特征创建转换层和归一化层
+            # Create transformation and normalization layers for each feature
             for feat_type, dim in feature_dims.items():
-                # 添加dropout提高泛化能力
+                # Add dropout to enhance generalization capabilities
                 self.feature_transforms[feat_type] = nn.Sequential(
                     nn.Linear(dim, self.standard_dim),
                     nn.Dropout(dropout_rate)
                 )
                 self.feature_norms[feat_type] = nn.LayerNorm(dim)
             
-            # 多粒度门控
+            # Multi grained gating parameters
             self.num_groups = num_groups
             self.group_size = self.standard_dim // self.num_groups
             
-            # 为每组特征创建独立的门控网络，添加残差连接和改进激活
+            # Create independent gating networks for each feature group incorporating GELU
             self.group_gate_nets = nn.ModuleList([
                 nn.Sequential(
                     nn.Linear(self.group_size * self.num_features, self.group_size),
-                    nn.LayerNorm(self.group_size),  # 添加层归一化
-                    nn.GELU(),  # 使用GELU替代ReLU
+                    nn.LayerNorm(self.group_size),
+                    nn.GELU(),
                     nn.Dropout(dropout_rate),
                     nn.Linear(self.group_size, self.num_features),
                 ) for _ in range(self.num_groups)
             ])
             
-            # 时序处理LSTM，添加dropout和更好的初始化
+            # Temporal processing LSTM with dropout and enhanced initialization
             self.temporal_lstm = nn.LSTM(
                 input_size=self.standard_dim * self.num_features,
                 hidden_size=self.standard_dim,
@@ -227,25 +192,25 @@ class ModelComponents:
                 num_layers=1
             )
             
-            # 添加残差连接的投影层
+            # Residual connection projection layer
             self.residual_proj = nn.Linear(self.standard_dim * self.num_features, self.standard_dim * 2)
             
-            # 最终的融合层，添加层归一化
+            # Final fusion layer normalization
             self.final_norm = nn.LayerNorm(self.standard_dim * 2)
             
-            # 初始化权重
+            # Reapply initialization
             self._init_weights()
             
         def _init_weights(self):
-            """改进的权重初始化"""
+            """Improved weight initialization strategy"""
             for module in self.modules():
                 if isinstance(module, nn.Linear):
-                    # 使用Xavier初始化
+                    # Apply Xavier uniform initialization
                     nn.init.xavier_uniform_(module.weight)
                     if module.bias is not None:
                         nn.init.zeros_(module.bias)
                 elif isinstance(module, nn.LSTM):
-                    # LSTM权重初始化
+                    # Specialized LSTM weight initialization
                     for name, param in module.named_parameters():
                         if 'weight_ih' in name:
                             nn.init.xavier_uniform_(param.data)
@@ -253,39 +218,32 @@ class ModelComponents:
                             nn.init.orthogonal_(param.data)
                         elif 'bias' in name:
                             nn.init.zeros_(param.data)
-                            # 设置遗忘门偏置为1
+                            # Set forget gate bias to one
                             n = param.size(0)
                             param.data[n//4:n//2].fill_(1.)
             
         def forward(self, features):
             """
-            前向传播
-            
-            参数:
-                features: 字典，包含各类型特征，如{'emotion2vec': tensor, 'hubert': tensor}
-                
-            返回:
-                融合后的特征和门控权重
+            Forward propagation through fusion layers
             """
             batch_size, seq_len, _ = features[self.feature_types[0]].shape
             
-            # 1. 特征归一化和转换
+            # 1. Feature normalization and transformation
             transformed_features = {}
             for feat_type in self.feature_types:
                 normalized = self.feature_norms[feat_type](features[feat_type])
                 transformed = self.feature_transforms[feat_type](normalized)
                 transformed_features[feat_type] = transformed
             
-            # 2. 多粒度门控融合
+            # 2. Multi grained gated fusion
             multi_grained_features = []
             gate_weights = {feat_type: [] for feat_type in self.feature_types}
 
-            # 【修改点 2】: 获取限制范围后的温度值 (防止 <= 0 导致除零错误)
-            # 限制最小值为 0.001
-            current_temp = torch.clamp(self.temperature, min=1e-3)
+            # Constrain temperature to prevent division by zero anomalies
+            current_temp = torch.clamp(torch.exp(self.log_temp), min=1e-3)
             
             for i in range(self.num_groups):
-                # 提取当前组的所有特征
+                # Extract features for current group slice
                 start_idx = i * self.group_size
                 end_idx = (i + 1) * self.group_size
                 
@@ -293,28 +251,14 @@ class ModelComponents:
                 for feat_type in self.feature_types:
                     group_feats.append(transformed_features[feat_type][..., start_idx:end_idx])
                 
-                # 拼接特征并计算门控权重
+                # Concatenate features and compute gating weights
                 group_concat = torch.cat(group_feats, dim=-1)
                 group_logits = self.group_gate_nets[i](group_concat)
                 
-                # 使用温度缩放的softmax提高数值稳定性
-                # temperature = 0.1
-                # group_gates = F.softmax(group_logits / temperature, dim=-1)
+                # Apply temperature scaled softmax to improve numerical stability
                 group_gates = F.softmax(group_logits / current_temp, dim=-1)
                 
-                # # 添加噪声防止过度自信
-                # if self.training:
-                #     noise = torch.randn_like(group_gates) * 0.01
-                #     group_gates = F.softmax((group_logits + noise) / temperature, dim=-1)
-
-                # if self.training:
-                #     # 噪声注入也使用当前温度
-                #     noise = torch.randn_like(group_logits) * 0.01
-                #     group_gates = F.softmax((group_logits + noise) / current_temp, dim=-1)
-                # else:
-                #     group_gates = F.softmax(group_logits / current_temp, dim=-1)
-                
-                # 加权特征
+                # Multiply features by corresponding gate weights
                 weighted_feats = []
                 for j, feat_type in enumerate(self.feature_types):
                     weight = group_gates[..., j:j+1]
@@ -322,41 +266,36 @@ class ModelComponents:
                     weighted_feat = group_feats[j] * weight
                     weighted_feats.append(weighted_feat)
                 
-                # 拼接加权后的特征
+                # Concatenate weighted features
                 group_feature = torch.cat(weighted_feats, dim=-1)
                 multi_grained_features.append(group_feature)
             
-            # 拼接所有组的特征
+            # Concatenate features across all groups
             multi_grained_fusion = torch.cat(multi_grained_features, dim=-1)
             
-            # 计算各特征的平均权重（用于监控）
+            # Compute average weight per feature for monitoring purposes
             avg_weights = {}
             for feat_type in self.feature_types:
                 avg_weights[feat_type] = torch.cat(gate_weights[feat_type], dim=-1).mean(dim=-1, keepdim=True)
             
-            # 3. 时序处理 - 添加残差连接
+            # 3. Temporal processing integrating residual connections
             residual_input = self.residual_proj(multi_grained_fusion)
             
             temporal_features, _ = self.temporal_lstm(multi_grained_fusion)
             
-            # 添加残差连接
+            # Add residual representation
             temporal_features = temporal_features + residual_input
             
-            # 4. 最终投影
+            # 4. Final feature projection
             fused_features = self.final_norm(temporal_features)
             
             return fused_features, avg_weights, current_temp
             
         def get_fusion_weights(self):
             """
-            获取当前门控融合机制使用的策略权重
-            
-            返回:
-                包含权重信息的字典
+            Retrieve currently utilized gating fusion strategy weights
             """
-            # 这里可以返回多粒度和时序处理的相关权重
-            # 实际中可能需要通过注册hook等方式获取
             return {
-                "grain_weight": 0.5,  # 示例值
+                "grain_weight": 0.5,
                 "temporal_weight": 0.5
             }

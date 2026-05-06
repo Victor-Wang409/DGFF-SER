@@ -1,6 +1,6 @@
 """
-主程序模块
-负责整个程序的入口和执行流程
+Main program module
+Serves as the entry point managing execution flow and hyperparameter parsing
 """
 
 import os
@@ -12,11 +12,11 @@ from torch.utils.data import DataLoader
 
 from dataset import EmotionDataset
 from trainer_executor import TrainerExecutor
-from util import split_iemocap
+from util import split_iemocap, split_msppodcast
 
 def main():
     """
-    主函数，负责整个程序的执行
+    Main function managing configuration setup and cross-validation execution
     """
     parser = argparse.ArgumentParser(description='Training VAD prediction model')
     parser.add_argument('--emotion2vec_dir', type=str, required=True, help='Directory containing emo2vec features')
@@ -38,14 +38,22 @@ def main():
     
     args = parser.parse_args()
     
-    # 设置随机种子
-    torch.manual_seed(args.seed)
-    np.random.seed(args.seed)
+    import random
     
-    # 创建保存目录
+    # Enforce strict determinism for reproducible deep learning experiments
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(args.seed)
+        torch.cuda.manual_seed_all(args.seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+    
+    # Create target directory for model artifacts
     os.makedirs(args.save_dir, exist_ok=True)
     
-    # 设置日志
+    # Configure unified logging subsystem
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s [%(levelname)s] %(message)s',
@@ -57,11 +65,11 @@ def main():
 
     logging.info(f"Actual batch size: {args.batch_size}")
     
-    # 设置设备
+    # Identify optimal computing device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logging.info(f"Using device: {device}")
     
-    # 加载数据集
+    # Instantiate emotion dataset abstraction
     dataset = EmotionDataset(
         args.emotion2vec_dir, 
         args.hubert_dir, 
@@ -70,22 +78,29 @@ def main():
         data2vec_dir=args.data2vec_dir
     )
     
-    # 基于说话人进行5折交叉验证
-    folds = split_iemocap(dataset.df)
+    # Dynamically select dataset splitting strategy based on metadata naming
+    csv_filename = os.path.basename(args.csv_path).lower()
+    if 'msp' in csv_filename:
+        logging.info("Using MSP-Podcast split strategy...")
+        folds = split_msppodcast(dataset.df)
+    else:
+        logging.info("Using IEMOCAP 5-fold split strategy...")
+        folds = split_iemocap(dataset.df)
+        
     fold_results = []
     
-    # 对每个fold进行训练
+    # Execute training loop across all dataset folds
     for fold in range(len(folds)):
         logging.info(f"\n{'='*50}\nFold {fold+1}/{len(folds)}\n{'='*50}")
         
-        # 创建当前fold的保存目录
+        # Prepare dedicated directory for current fold artifacts
         fold_dir = os.path.join(args.save_dir, f'fold{fold+1}')
         os.makedirs(fold_dir, exist_ok=True)
         
-        # 获取当前fold的数据
+        # Extract indices specific to current fold
         fold_data = folds[fold]
         
-        # 训练模型并获取测试结果
+        # Train model and append evaluation metrics
         fold_results.append(
             TrainerExecutor.train_model(
                 args=args,
@@ -99,7 +114,7 @@ def main():
             )
         )
     
-    # 计算并保存所有fold的最终结果
+    # Aggregate and statistical evaluation of cross-validation metrics
     avg_v = np.mean([res[0] for res in fold_results])
     avg_a = np.mean([res[1] for res in fold_results])
     avg_d = np.mean([res[2] for res in fold_results])
@@ -120,7 +135,7 @@ def main():
     
     logging.info(f"\n{'='*50}\n{final_results}\n{'='*50}")
     
-    # 保存最终结果
+    # Persist final statistical performance
     with open(os.path.join(args.save_dir, 'final_results.txt'), 'w') as f:
         f.write(final_results)
 

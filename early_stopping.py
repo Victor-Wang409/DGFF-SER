@@ -1,19 +1,15 @@
 """
-早停机制模块
-用于防止模型训练过程中的过拟合
+Early stopping module
+Implements early termination to prevent model overfitting during iterative optimization
 """
 
 class EarlyStopping:
     """
-    早停机制，用于防止过拟合
+    Early stopping mechanism terminating optimization when generalization stops improving
     """
     def __init__(self, patience=10, min_delta=0):
         """
-        初始化早停对象
-        
-        参数:
-            patience: 容忍连续性能不提升的轮数
-            min_delta: 性能提升的最小差异
+        Initialize early stopping criteria
         """
         self.patience = patience
         self.min_delta = min_delta
@@ -23,10 +19,7 @@ class EarlyStopping:
         
     def __call__(self, val_loss):
         """
-        检查是否应该早停
-        
-        参数:
-            val_loss: 当前验证损失
+        Evaluate current validation loss against historical best to update termination state
         """
         if self.best_loss is None:
             self.best_loss = val_loss

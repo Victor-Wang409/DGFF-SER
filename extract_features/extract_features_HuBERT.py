@@ -7,21 +7,21 @@ from tqdm import tqdm
 from transformers import Wav2Vec2FeatureExtractor, HubertModel
 
 def batch_extract_and_save(input_dir, output_dir):
-    # 1. 准备目录与文件列表
+    # Prepare directories and file lists
     input_path = Path(input_dir)
     output_path = Path(output_dir)
-    output_path.mkdir(parents=True, exist_ok=True) # 如果输出目录不存在则创建
+    output_path.mkdir(parents=True, exist_ok=True)
 
-    # 支持的音频格式，可自行添加
+    # Define supported audio extensions
     valid_extensions = {'.wav', '.mp3', '.flac'}
     audio_files = [f for f in input_path.rglob('*') if f.suffix.lower() in valid_extensions]
 
     if not audio_files:
-        print(f"在 {input_dir} 下未找到音频文件。")
+        print(f"No audio files found in {input_dir}")
         return
 
-    # 2. 初始化模型与设备 (移出循环，避免重复加载)
-    print("正在加载 HuBERT-large 模型...")
+    # Initialize model and computing device
+    print("Loading HuBERT large model")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model_name = "facebook/hubert-large-ll60k"
     
@@ -29,44 +29,43 @@ def batch_extract_and_save(input_dir, output_dir):
     model = HubertModel.from_pretrained(model_name).to(device)
     model.eval()
 
-    # 3. 遍历提取
-    print(f"开始批量提取，共计 {len(audio_files)} 个文件。使用设备: {device}")
+    # Iterate and extract features
+    print(f"Starting batch extraction for {len(audio_files)} files on device {device}")
     
-    for audio_file in tqdm(audio_files, desc="特征提取进度"):
-        # 构建输出文件名
+    for audio_file in tqdm(audio_files, desc="Feature extraction progress"):
+        # Construct output file path
         output_file = output_path / f"{audio_file.stem}.npy"
         
-        # 如果文件已存在则跳过 (支持断点续传)
+        # Skip if file already exists
         if output_file.exists():
             continue
 
         try:
-            # 读取音频
+            # Read audio data
             speech, sr = librosa.load(audio_file, sr=16000)
             
-            # 数据需移动到对应设备 (GPU/CPU)
+            # Transfer data to target computing device
             inputs = processor(speech, return_tensors="pt", sampling_rate=16000).to(device)
 
-            # 提取特征
+            # Extract hierarchical features
             with torch.no_grad():
                 outputs = model(**inputs, output_hidden_states=True)
 
-            # 融合第 10 到 15 层
+            # Fuse hidden states from layer 10 to 15
             target_layers = outputs.hidden_states[10:16]
             fused_features = torch.mean(torch.stack(target_layers), dim=0).squeeze(0)
 
-            # 转为 numpy(float16) 并保存
+            # Convert to float16 numpy array and save
             features_np = fused_features.cpu().numpy().astype('float16')
             np.save(output_file, features_np)
 
         except Exception as e:
-            print(f"\n[错误] 处理 {audio_file.name} 失败: {str(e)}")
+            print(f"\nError processing {audio_file.name}: {str(e)}")
 
-    print("\n所有特征处理完毕！")
+    print("\nFeature processing complete")
 
-# 执行代码
+# Execute extraction pipeline
 if __name__ == "__main__":
-    # 请替换为你的实际文件夹路径
     INPUT_DIRECTORY = "/home/victor/DataSet/IEMOCAP"   
     OUTPUT_DIRECTORY = "/home/victor/Github/DGFF-SER/hubert_large_features" 
     

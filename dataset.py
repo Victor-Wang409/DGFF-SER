@@ -1,6 +1,6 @@
 """
-数据集模块
-用于加载和处理情感数据
+Dataset module
+Handles loading and processing of affective data
 """
 
 import os
@@ -8,21 +8,15 @@ import torch
 import numpy as np
 import pandas as pd
 import torch.nn.functional as F
+import ast
 
 class EmotionDataset(torch.utils.data.Dataset):
     """
-    情感数据集类，用于加载和处理情感数据
+    Emotion dataset class for managing affective data samples
     """
     def __init__(self, emotion2vec_dir, hubert_dir, csv_path, wav2vec_dir=None, data2vec_dir=None):
         """
-        初始化数据集
-        
-        参数:
-            emotion2vec_dir: emotion2vec特征目录
-            hubert_dir: hubert特征目录
-            csv_path: 标注CSV文件路径
-            wav2vec_dir: wav2vec特征目录，None表示不使用
-            data2vec_dir: data2vec特征目录，None表示不使用
+        Initialize dataset with feature directories and label annotations
         """
         self.df = pd.read_csv(csv_path)
         self.emotion2vec_dir = emotion2vec_dir
@@ -30,7 +24,7 @@ class EmotionDataset(torch.utils.data.Dataset):
         self.wav2vec_dir = wav2vec_dir
         self.data2vec_dir = data2vec_dir
  
-        # 将情感标签映射到数值
+        # Map categorical emotion labels to numerical indices
         self.emotion_map = {
             'neu': 0, 
             'hap': 1,
@@ -44,12 +38,13 @@ class EmotionDataset(torch.utils.data.Dataset):
 
         self.vad_labels = []
         for vad_str in self.df['VAD_normalized']:
-            vad = eval(vad_str)
+            # Use safe evaluation for parsed list structures
+            vad = ast.literal_eval(vad_str)
             self.vad_labels.append(torch.tensor(vad, dtype=torch.float))
         
         self.emotion_labels = []
         for label in self.df['Label']:
-            # 转换为one-hot向量
+            # Convert categorical labels to one-hot encoding vectors
             label_idx = self.emotion_map[label]
             one_hot = torch.zeros(len(self.emotion_map))
             one_hot[label_idx] = 1
@@ -57,31 +52,25 @@ class EmotionDataset(torch.utils.data.Dataset):
 
     def __len__(self):
         """
-        返回数据集大小
+        Return the total number of samples in the dataset
         """
         return len(self.df)
         
     def __getitem__(self, idx):
         """
-        获取单个样本
-        
-        参数:
-            idx: 样本索引
-            
-        返回:
-            样本数据字典
+        Retrieve and process a single data sample
         """
         row = self.df.iloc[idx]
         base_filename = os.path.splitext(row['FileName'])[0]
         
-        # 加载必需的两种特征
+        # Load essential feature modalities
         emotion2vec_path = os.path.join(self.emotion2vec_dir, f"{base_filename}.npy")
         hubert_path = os.path.join(self.hubert_dir, f"{base_filename}.npy")
         
         emotion2vec_features = torch.from_numpy(np.load(emotion2vec_path)).float()
         hubert_features = torch.from_numpy(np.load(hubert_path)).float()
         
-        # 加载其他特征（如果目录存在）
+        # Load supplementary feature modalities if available
         wav2vec_features = None
         data2vec_features = None
         
@@ -93,7 +82,7 @@ class EmotionDataset(torch.utils.data.Dataset):
             data2vec_path = os.path.join(self.data2vec_dir, f"{base_filename}.npy")
             data2vec_features = torch.from_numpy(np.load(data2vec_path)).float()
         
-        # 使用插值来对齐特征长度
+        # Aggregate all loaded features
         all_features = [emotion2vec_features, hubert_features]
         if wav2vec_features is not None:
             all_features.append(wav2vec_features)
@@ -102,18 +91,17 @@ class EmotionDataset(torch.utils.data.Dataset):
         
         target_len = max([feat.size(0) for feat in all_features])
         
-        # 调整所有特征到相同长度
+        # Align all features to the maximum sequence length via linear interpolation
         for i in range(len(all_features)):
             if all_features[i].size(0) != target_len:
-                # [修正] 针对语音特征 [seq_len, dim] 的标准插值做法
-                # F.interpolate 期望输入为 [Batch, Channel, Length]
-                x = all_features[i].transpose(0, 1).unsqueeze(0) # [1, dim, seq_len]
+                # Interpolate temporal sequence length along the correct dimension
+                x = all_features[i].transpose(0, 1).unsqueeze(0)
                 all_features[i] = F.interpolate(
                     x,
                     size=target_len,
                     mode='linear',
                     align_corners=True
-                ).squeeze(0).transpose(0, 1) # [target_len, dim]
+                ).squeeze(0).transpose(0, 1)
         
         result = {
             "id": row['FileName'],
@@ -123,7 +111,7 @@ class EmotionDataset(torch.utils.data.Dataset):
             "emotion_labels": self.emotion_labels[idx]
         }
         
-        # 添加其他特征（如果存在）
+        # Inject supplementary features into the output dictionary
         if wav2vec_features is not None:
             result["wav2vec_features"] = all_features[2]
         if data2vec_features is not None:

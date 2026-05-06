@@ -1,24 +1,18 @@
 """
-数据处理模块
-负责批次数据的收集和处理
+Data processing module
+Handles collation and formatting of data batches for computational efficiency
 """
 
 import torch
 
 class DataProcessor:
     """
-    数据处理类，处理批次数据的收集和处理
+    Data processor managing batch assembly and tensor formatting
     """
     @staticmethod
     def collate_fn(batch):
         """
-        数据批处理函数,用于DataLoader
-        
-        参数:
-            batch: 批次数据
-            
-        返回:
-            处理后的批次数据
+        Data batching function unifying temporal sequences into dense rectangular tensors via zero padding
         """
         max_len = max([b["emotion2vec_features"].shape[0] for b in batch])
         
@@ -26,7 +20,7 @@ class DataProcessor:
         batch_features["emotion2vec_features"] = []
         batch_features["hubert_features"] = []
         
-        # 检查其他可能的特征
+        # Verify presence of supplementary speech foundation representations
         has_wav2vec = "wav2vec_features" in batch[0]
         has_data2vec = "data2vec_features" in batch[0]
         
@@ -45,7 +39,7 @@ class DataProcessor:
             pad_len = max_len - curr_len
             
             if pad_len > 0:
-                # 对所有特征进行padding
+                # Apply zero padding to align heterogeneous temporal lengths within a batch
                 batch_features["emotion2vec_features"].append(
                     torch.cat([item["emotion2vec_features"], 
                             torch.zeros(pad_len, item["emotion2vec_features"].shape[1])], dim=0)
@@ -88,7 +82,7 @@ class DataProcessor:
             batch_labels.append(item["labels"])
             batch_emotion_labels.append(item["emotion_labels"])
         
-        # 将列表转为tensor
+        # Convert batched lists into optimized multidimensional tensors
         result = {
             "id": batch_ids,
             "padding_mask": torch.stack(batch_padding_masks).bool(),
@@ -96,7 +90,7 @@ class DataProcessor:
             "emotion_labels": torch.stack(batch_emotion_labels)
         }
         
-        # 添加所有特征
+        # Assimilate all dynamically extracted feature types
         for feat_type, feat_list in batch_features.items():
             result[feat_type] = torch.stack(feat_list)
         

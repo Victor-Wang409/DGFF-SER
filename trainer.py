@@ -1,6 +1,6 @@
 """
-训练和评估模块
-负责模型的训练和评估
+Training and evaluation module
+Orchestrates neural network training iterations and performance validation
 """
 
 import torch
@@ -9,32 +9,17 @@ from loss_functions import LossFactory
 
 class TrainingManager:
     """
-    训练管理器，封装训练和评估相关的函数
+    Training manager encapsulating functions for training epochs and model validation
     """
     @staticmethod
     def train_one_epoch(model, optimizer, vad_criterion, contrast_criterion, train_loader, device):
         """
-        训练一个epoch
-        
-        参数:
-            model: 模型
-            optimizer: 优化器
-            vad_criterion: 主损失函数
-            contrast_criterion: 对比损失函数
-            train_loader: 训练数据加载器
-            device: 设备
-            gradient_accumulation_steps: 梯度累积步数
-
-        参数修改:
-            criterion -> vad_criterion (CCC Loss)
-            
-        返回:
-            训练指标字典
+        Execute a single training epoch over the entire dataset
         """
         model.train()
         total_loss = 0.0
         total_batches = 0
-        total_weights = {}  # 存储各特征的权重
+        total_weights = {}
         total_vad_loss = 0.0
         total_contrast_loss = 0.0
         
@@ -46,13 +31,13 @@ class TrainingManager:
 
             optimizer.zero_grad()
 
-            # 准备特征字典
+            # Prepare feature dictionary
             features = {
                 "emotion2vec": batch["emotion2vec_features"].to(device),
                 "hubert": batch["hubert_features"].to(device)
             }
             
-            # 添加其他特征（如果存在）
+            # Incorporate supplementary features if available
             if "wav2vec_features" in batch:
                 features["wav2vec"] = batch["wav2vec_features"].to(device)
             if "data2vec_features" in batch:
@@ -72,44 +57,44 @@ class TrainingManager:
             contrast_loss = contrast_criterion(contrast_features, emotion_indices)
             loss = 1.0 * vad_loss + 0.6 * contrast_loss
 
-            # 反向传播与更新
+            # Backpropagation and parameter updates
             loss.backward()
             
-            # [修复 1.1] 梯度裁剪必须夹在 backward 之后，step 之前，对整个模型的参数生效
+            # Gradient clipping must be executed after backward and before optimizer step to affect all parameters
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             
             optimizer.step()
-            # [修复 1.3] 已删除会极大拖慢训练速度的 torch.cuda.empty_cache()
+            # Explicit cache clearing is removed to prevent severe training slowdowns
 
-            # 记录数据
+            # Record metrics
             total_loss += loss.item()
             total_vad_loss += vad_loss.item()
             total_contrast_loss += contrast_loss.item()
             total_batches += 1
             
-            # 记录门控权重
+            # Record gating weights
             for feat_type, weight in feature_weights.items():
                 if feat_type not in total_weights:
                     total_weights[feat_type] = 0.0
                 total_weights[feat_type] += weight.mean().item()
 
-            # 更新进度条
+            # Update progress tracking
             avg_weights = {f"{k}_w": f"{total_weights[k] / total_batches:.3f}" for k in total_weights}
             postfix_info = {'loss': f'{(total_loss/(batch_idx+1)):.4f}'}
             postfix_info.update(avg_weights)
             progress_bar.set_postfix(postfix_info)
-            progress_bar.update(1) # 改为每步更新1
+            progress_bar.update(1)
         
         progress_bar.close()
         
-        # 返回结果
+        # Return epoch results
         result = {
             'loss': total_loss / len(train_loader),
             'vad_loss': total_vad_loss / len(train_loader),
             'contrast_loss': total_contrast_loss / len(train_loader),
         }
     
-        # 添加各特征的平均权重
+        # Append average weights for each feature modality
         for feat_type in total_weights:
             result[f'{feat_type}_weight'] = total_weights[feat_type] / total_batches
         
@@ -118,15 +103,7 @@ class TrainingManager:
     @staticmethod
     def validate_and_test(model, data_loader, device):
         """
-        验证和测试模型
-        
-        参数:
-            model: 模型
-            data_loader: 数据加载器
-            device: 设备
-            
-        返回:
-            验证/测试指标
+        Validate and test model generalization performance
         """
         model.eval()
         all_vad_preds = []
@@ -134,13 +111,13 @@ class TrainingManager:
         
         with torch.no_grad():
             for batch in tqdm(data_loader, desc='Evaluating', leave=False):
-                # 准备特征字典
+                # Prepare feature dictionary
                 features = {
                     "emotion2vec": batch["emotion2vec_features"].to(device),
                     "hubert": batch["hubert_features"].to(device)
                 }
                 
-                # 添加其他特征（如果存在）
+                # Incorporate supplementary features if available
                 if "wav2vec_features" in batch:
                     features["wav2vec"] = batch["wav2vec_features"].to(device)
                 if "data2vec_features" in batch:
@@ -149,18 +126,18 @@ class TrainingManager:
                 padding_mask = batch["padding_mask"].to(device)
                 labels = batch["labels"].to(device)
                 
-                # [修改 7] 获取多任务输出
-                vad_preds, discrete_logits, _, _ = model(features, padding_mask)
+                # Resolve return value confusion by correctly identifying gate weights instead of discrete logits
+                vad_preds, gate_weights, _, _ = model(features, padding_mask)
                 
                 all_vad_preds.append(vad_preds)
                 all_vad_labels.append(batch["labels"].to(device))
                 
         
-        # 拼接结果
+        # Concatenate evaluation batches
         all_vad_preds = torch.cat(all_vad_preds, dim=0)
         all_vad_labels = torch.cat(all_vad_labels, dim=0)
         
-        # 计算指标
+        # Compute concordance correlation coefficient metrics
         ccc_v = LossFactory._compute_dimension_ccc(all_vad_preds[:, 0], all_vad_labels[:, 0]).item()
         ccc_a = LossFactory._compute_dimension_ccc(all_vad_preds[:, 1], all_vad_labels[:, 1]).item()
         ccc_d = LossFactory._compute_dimension_ccc(all_vad_preds[:, 2], all_vad_labels[:, 2]).item()
