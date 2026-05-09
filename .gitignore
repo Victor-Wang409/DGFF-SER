@@ -1,6 +1,5 @@
 facebook/
 results/
 models/
-emo2vec_large_features/
-hubert_large_features/
+Features/
 .DS_Store
