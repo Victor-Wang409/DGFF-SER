@@ -93,6 +93,16 @@ def main():
     for fold in range(len(folds)):
         logging.info(f"\n{'='*50}\nFold {fold+1}/{len(folds)}\n{'='*50}")
         
+        # [修复] 交叉验证严谨性：在每个 Fold 开始前重置随机种子。
+        # 加上 fold 偏移量，既保证各个 Fold 之间的参数初始化不同，又保证多次运行实验的完全可复现。
+        current_seed = args.seed + fold
+        random.seed(current_seed)
+        np.random.seed(current_seed)
+        torch.manual_seed(current_seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(current_seed)
+            torch.cuda.manual_seed_all(current_seed)
+        
         # Prepare dedicated directory for current fold artifacts
         fold_dir = os.path.join(args.save_dir, f'fold{fold+1}')
         os.makedirs(fold_dir, exist_ok=True)

@@ -144,8 +144,8 @@ class ModelComponents:
             self.feature_dims = feature_dims
             self.num_features = len(self.feature_types)
             self.dropout_rate = dropout_rate
-            # Initialize logarithmic temperature to ensure scientific constraints via exponential activation
-            self.log_temp = nn.Parameter(torch.log(torch.tensor(0.1)))
+            # Initialize fixed scalar temperature for gating softmax
+            self.temperature = 0.1
             # Execute weight initialization
             self._init_weights()
             
@@ -239,8 +239,8 @@ class ModelComponents:
             multi_grained_features = []
             gate_weights = {feat_type: [] for feat_type in self.feature_types}
 
-            # Constrain temperature to prevent division by zero anomalies
-            current_temp = torch.clamp(torch.exp(self.log_temp), min=1e-3)
+            # Enforce strict positivity via exponential activation preventing saturation gradients
+            current_temp = torch.exp(self.log_temp)
             
             for i in range(self.num_groups):
                 # Extract features for current group slice
@@ -294,6 +294,11 @@ class ModelComponents:
         def get_fusion_weights(self):
             """
             Retrieve currently utilized gating fusion strategy weights
+            """
+            return {
+                "grain_weight": 0.5,
+                "temporal_weight": 0.5
+            } weights
             """
             return {
                 "grain_weight": 0.5,

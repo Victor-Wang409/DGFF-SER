@@ -17,7 +17,7 @@ class LossFactory:
         """
         def __init__(self, temperature=0.1):
             """
-            Initialize supervised contrastive loss with temperature scalar
+            Initialize supervised contrastive loss with fixed scalar temperature
             """
             super().__init__()
             self.temperature = temperature
@@ -39,8 +39,12 @@ class LossFactory:
             similarity_matrix = torch.matmul(features, features.T)
             similarity_matrix = torch.clamp(similarity_matrix, min=-1.0, max=1.0)
             
-            # Apply temperature scaling to control prediction distribution sharpness
-            logits = similarity_matrix / self.temperature
+            # Extract fixed temperature ensuring strict positivity via manual bounds
+            temperature = torch.tensor(self.temperature, device=features.device)
+            
+            # Prevent division by zero and temperature saturation causing NaN logits
+            safe_temperature = torch.clamp(temperature, min=1e-2)
+            logits = similarity_matrix / safe_temperature
             
             # Mask diagonal entries to eliminate trivial self-contrastive optimization shortcuts
             mask = torch.eye(batch_size, dtype=torch.bool, device=features.device)
