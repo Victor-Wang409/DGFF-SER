@@ -25,7 +25,7 @@ def main():
     parser.add_argument('--data2vec_dir', type=str, default=None, help='Directory containing data2vec features')
     parser.add_argument('--batch_size', type=int, default=16, help='Batch size for training')
     parser.add_argument('--csv_path', type=str, required=True)
-    parser.add_argument('--epochs', type=int, default=20)
+    parser.add_argument('--epochs', type=int, default=10)
     parser.add_argument('--lr', type=float, default=1e-4)
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--save_dir', type=str, default='./models')
@@ -92,6 +92,16 @@ def main():
     # Execute training loop across all dataset folds
     for fold in range(len(folds)):
         logging.info(f"\n{'='*50}\nFold {fold+1}/{len(folds)}\n{'='*50}")
+        
+        # [修复] 交叉验证严谨性：在每个 Fold 开始前重置随机种子。
+        # 加上 fold 偏移量，既保证各个 Fold 之间的参数初始化不同，又保证多次运行实验的完全可复现。
+        current_seed = args.seed + fold
+        random.seed(current_seed)
+        np.random.seed(current_seed)
+        torch.manual_seed(current_seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(current_seed)
+            torch.cuda.manual_seed_all(current_seed)
         
         # Prepare dedicated directory for current fold artifacts
         fold_dir = os.path.join(args.save_dir, f'fold{fold+1}')
