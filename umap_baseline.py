@@ -7,6 +7,7 @@ from tqdm import tqdm
 from pathlib import Path
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import silhouette_score
 import umap
 
 # 导入baseline模型定义
@@ -84,6 +85,21 @@ def plot_umap(features, labels, label_names, output_dir, n_neighbors=15, min_dis
     )
     umap_results = reducer.fit_transform(features_preprocessed)
     
+    # 计算轮廓系数
+    print("计算轮廓系数...")
+    try:
+        silhouette_orig = silhouette_score(features_preprocessed, labels)
+        silhouette_umap = silhouette_score(umap_results, labels)
+        print(f"原始特征的轮廓系数: {silhouette_orig:.4f}")
+        print(f"UMAP降维后的轮廓系数: {silhouette_umap:.4f}")
+        
+        # 将结果保存到文件
+        with open(os.path.join(output_dir, 'silhouette_scores.txt'), 'w') as f:
+            f.write(f"Original Features Silhouette Score: {silhouette_orig:.4f}\n")
+            f.write(f"UMAP Features Silhouette Score: {silhouette_umap:.4f}\n")
+    except Exception as e:
+        print(f"计算轮廓系数时出错: {e}")
+
     print("创建可视化图像...")
     plt.figure(figsize=(12, 8))
     
