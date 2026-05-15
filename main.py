@@ -25,7 +25,7 @@ def main():
     parser.add_argument('--data2vec_dir', type=str, default=None, help='Directory containing data2vec features')
     parser.add_argument('--batch_size', type=int, default=16, help='Batch size for training')
     parser.add_argument('--csv_path', type=str, required=True)
-    parser.add_argument('--epochs', type=int, default=20)
+    parser.add_argument('--epochs', type=int, default=10)
     parser.add_argument('--lr', type=float, default=1e-4)
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--save_dir', type=str, default='./models')
