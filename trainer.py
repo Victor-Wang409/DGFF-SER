@@ -19,7 +19,8 @@ class TrainingManager:
         model.train()
         total_loss = 0.0
         total_batches = 0
-        total_weights = {}
+        total_weight_sums = {}
+        total_weight_counts = {}
         total_vad_loss = 0.0
         total_contrast_loss = 0.0
         
@@ -72,14 +73,30 @@ class TrainingManager:
             total_contrast_loss += contrast_loss.item()
             total_batches += 1
             
-            # Record gating weights
+            # Record group-wise gating weights using valid frames only.
+            valid_frames = (~padding_mask).unsqueeze(-1)
             for feat_type, weight in feature_weights.items():
-                if feat_type not in total_weights:
-                    total_weights[feat_type] = 0.0
-                total_weights[feat_type] += weight.mean().item()
+                if weight.shape[:2] != padding_mask.shape:
+                    raise ValueError(
+                        f"Gate weights for {feat_type} have incompatible shape "
+                        f"{tuple(weight.shape)}"
+                    )
+
+                expanded_valid_frames = valid_frames.expand_as(weight)
+                valid_weights = weight.masked_select(expanded_valid_frames)
+
+                if feat_type not in total_weight_sums:
+                    total_weight_sums[feat_type] = 0.0
+                    total_weight_counts[feat_type] = 0
+                total_weight_sums[feat_type] += valid_weights.sum().item()
+                total_weight_counts[feat_type] += valid_weights.numel()
 
             # Update progress tracking
-            avg_weights = {f"{k}_w": f"{total_weights[k] / total_batches:.3f}" for k in total_weights}
+            avg_weights = {
+                f"{k}_w": f"{total_weight_sums[k] / total_weight_counts[k]:.3f}"
+                for k in total_weight_sums
+                if total_weight_counts[k] > 0
+            }
             postfix_info = {'loss': f'{(total_loss/(batch_idx+1)):.4f}'}
             postfix_info.update(avg_weights)
             progress_bar.set_postfix(postfix_info)
@@ -95,8 +112,10 @@ class TrainingManager:
         }
     
         # Append average weights for each feature modality
-        for feat_type in total_weights:
-            result[f'{feat_type}_weight'] = total_weights[feat_type] / total_batches
+        for feat_type in total_weight_sums:
+            result[f'{feat_type}_weight'] = (
+                total_weight_sums[feat_type] / total_weight_counts[feat_type]
+            )
         
         return result
 

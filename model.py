@@ -118,7 +118,7 @@ class VADModelWithGating(PreTrainedModel):
         Forward pass computing VAD output gate weights and contrastive features
         """
         # Execute feature fusion
-        x, gate_weights, current_temp = self.feature_fusion(features)
+        x, gate_weights, current_temp = self.feature_fusion(features, padding_mask)
         
         # Project fused features to hidden dimension
         x = self.input_proj(x)

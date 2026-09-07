@@ -6,6 +6,7 @@ Contains neural architecture components enhancing feature gating and fusion
 import torch
 from torch import nn
 import torch.nn.functional as F
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 class ModelComponents:
     """
@@ -20,19 +21,28 @@ class ModelComponents:
             Initialize attention pooling layer
             """
             super().__init__()
-            self.attention = nn.Linear(hidden_dim, 1)
+            # Additive attention: e_t = w^T tanh(W_p h_t + b_p).
+            self.projection = nn.Linear(hidden_dim, hidden_dim)
+            self.scorer = nn.Linear(hidden_dim, 1, bias=False)
 
         def forward(self, x, padding_mask=None):
             """
             Compute attention weights and aggregate temporal features
             """
-            # Calculate attention scores
-            attn_weights = self.attention(x)
-            attn_weights = attn_weights.squeeze(-1)
+            # Calculate the additive attention score for every frame.
+            attn_scores = self.scorer(torch.tanh(self.projection(x))).squeeze(-1)
 
             if padding_mask is not None:
-                attn_weights = attn_weights.masked_fill(padding_mask, float('-inf'))
-            attn_weights = torch.softmax(attn_weights, dim=1)
+                if padding_mask.shape != attn_scores.shape:
+                    raise ValueError(
+                        f"padding_mask must have shape {tuple(attn_scores.shape)}, "
+                        f"but got {tuple(padding_mask.shape)}"
+                    )
+                if padding_mask.all(dim=1).any():
+                    raise ValueError("Attention pooling received an all-padding sequence")
+                attn_scores = attn_scores.masked_fill(padding_mask, float('-inf'))
+
+            attn_weights = torch.softmax(attn_scores, dim=1)
             weights_sum = torch.bmm(attn_weights.unsqueeze(1), x)
             weights_sum = weights_sum.squeeze(1)
 
@@ -231,7 +241,7 @@ class ModelComponents:
                             n = param.size(0)
                             param.data[n//4:n//2].fill_(1.)
             
-        def forward(self, features):
+        def forward(self, features, padding_mask=None):
             """
             Fuse aligned frame-level feature sequences.
 
@@ -285,23 +295,54 @@ class ModelComponents:
             # Concatenate features across all groups
             multi_grained_fusion = torch.cat(multi_grained_features, dim=-1)
             
-            # Compute average weight per feature for monitoring purposes
-            avg_weights = {}
+            # Preserve the group axis for downstream analysis. Each tensor has
+            # shape [B, T, G].
+            source_group_weights = {}
             for feat_type in self.feature_types:
-                avg_weights[feat_type] = torch.cat(gate_weights[feat_type], dim=-1).mean(dim=-1, keepdim=True)
+                source_group_weights[feat_type] = torch.cat(gate_weights[feat_type], dim=-1)
             
             # 3. Temporal processing integrating residual connections
             residual_input = self.residual_proj(multi_grained_fusion)
             
-            temporal_features, _ = self.temporal_lstm(multi_grained_fusion)
+            if padding_mask is None:
+                temporal_features, _ = self.temporal_lstm(multi_grained_fusion)
+            else:
+                if padding_mask.shape != multi_grained_fusion.shape[:2]:
+                    raise ValueError(
+                        "padding_mask must match the batch and temporal dimensions "
+                        f"{tuple(multi_grained_fusion.shape[:2])}, but got "
+                        f"{tuple(padding_mask.shape)}"
+                    )
+
+                lengths = (~padding_mask).sum(dim=1)
+                if (lengths <= 0).any():
+                    raise ValueError("BiLSTM received an all-padding sequence")
+
+                packed_features = pack_padded_sequence(
+                    multi_grained_fusion,
+                    lengths.cpu(),
+                    batch_first=True,
+                    enforce_sorted=False,
+                )
+                packed_temporal_features, _ = self.temporal_lstm(packed_features)
+                temporal_features, _ = pad_packed_sequence(
+                    packed_temporal_features,
+                    batch_first=True,
+                    total_length=multi_grained_fusion.size(1),
+                )
             
             # Add residual representation
             temporal_features = temporal_features + residual_input
             
             # 4. Final feature projection
             fused_features = self.final_norm(temporal_features)
+
+            # Keep padded frames neutral for the following Transformer and for
+            # diagnostic feature extraction.
+            if padding_mask is not None:
+                fused_features = fused_features.masked_fill(padding_mask.unsqueeze(-1), 0.0)
             
-            return fused_features, avg_weights, current_temp
+            return fused_features, source_group_weights, current_temp
             
         def get_fusion_weights(self):
             """

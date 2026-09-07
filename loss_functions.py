@@ -20,15 +20,24 @@ class LossFactory:
             Initialize supervised contrastive loss with fixed scalar temperature
             """
             super().__init__()
-            self.temperature = temperature
+            if temperature <= 0:
+                raise ValueError(f"temperature must be positive, but got {temperature}")
+            self.temperature = float(temperature)
             
         def forward(self, features, labels):
             """
             Compute supervised contrastive loss via feature similarity matrix
             """
-            # Inject numerical stability verification for NaN or infinite values
-            if torch.isnan(features).any() or torch.isinf(features).any():
-                return torch.tensor(0.0, device=features.device, requires_grad=True)
+            if features.ndim != 2:
+                raise ValueError(
+                    f"features must have shape [B, D], but got {tuple(features.shape)}"
+                )
+            if labels.ndim != 1 or labels.shape[0] != features.shape[0]:
+                raise ValueError(
+                    "labels must have shape [B] and match the feature batch size"
+                )
+            if not torch.isfinite(features).all():
+                raise ValueError("Supervised contrastive features contain NaN or Inf")
             
             batch_size = features.shape[0]
             
@@ -37,14 +46,7 @@ class LossFactory:
             
             # Compute similarity matrix via dot product representing projection scores
             similarity_matrix = torch.matmul(features, features.T)
-            similarity_matrix = torch.clamp(similarity_matrix, min=-1.0, max=1.0)
-            
-            # Extract fixed temperature ensuring strict positivity via manual bounds
-            temperature = torch.tensor(self.temperature, device=features.device)
-            
-            # Prevent division by zero and temperature saturation causing NaN logits
-            safe_temperature = torch.clamp(temperature, min=1e-2)
-            logits = similarity_matrix / safe_temperature
+            logits = similarity_matrix / self.temperature
             
             # Mask diagonal entries to eliminate trivial self-contrastive optimization shortcuts
             mask = torch.eye(batch_size, dtype=torch.bool, device=features.device)
@@ -53,27 +55,28 @@ class LossFactory:
             # Compute logarithmic softmax over scaled similarities
             log_probs = F.log_softmax(logits, dim=1)
             
-            # Build index matrix mapping each instance to its positive class neighbors
-            L_cl = []
-            for i in range(batch_size):
-                # Identify indices belonging to the identical class cluster
-                same_class_indices = torch.where(labels == labels[i])[0]
-                # Exclude the current instance itself
-                same_class_indices = same_class_indices[same_class_indices != i]
-                L_cl.append(same_class_indices)
-            
-            # Accumulate average contrastive loss across all instances
-            loss = torch.tensor(0.0, device=features.device)
-            for i in range(batch_size):
-                if len(L_cl[i]) > 0:
-                    # Gather logarithmic probabilities of all valid positive matches
-                    pos_logits = log_probs[i, L_cl[i]]
-                    # Aggregate sample loss via negative log likelihood
-                    sample_loss = -torch.mean(pos_logits)
-                    loss += sample_loss
-            
-            # Normalize computed total loss against valid batch size
-            return loss / batch_size if batch_size > 0 else loss
+            # Positive pairs share a class but exclude the anchor itself.
+            positive_mask = labels.unsqueeze(0).eq(labels.unsqueeze(1)) & ~mask
+            positive_counts = positive_mask.sum(dim=1)
+            valid_anchors = positive_counts > 0
+
+            # A batch with no positive pair contributes a graph-connected zero,
+            # so joint-loss backward remains valid.
+            if not valid_anchors.any():
+                return features.sum() * 0.0
+
+            selected_log_probs = torch.where(
+                positive_mask,
+                log_probs,
+                torch.zeros_like(log_probs),
+            )
+            mean_positive_log_prob = (
+                selected_log_probs.sum(dim=1)
+                / positive_counts.clamp_min(1)
+            )
+
+            # Average over anchors for which P(i) is non-empty.
+            return -mean_positive_log_prob[valid_anchors].mean()
 
     class CCCLoss(nn.Module):
         """

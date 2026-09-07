@@ -5,6 +5,7 @@ Governs the overall model training workflow and resource allocation
 
 import os
 import logging
+import copy
 import torch
 from torch import optim
 from torch.utils.data import DataLoader, SubsetRandomSampler
@@ -73,8 +74,13 @@ class TrainerExecutor:
         
         # Establish performance tracking log
         metrics_file = os.path.join(fold_dir, 'metrics.csv')
+        gate_metric_names = [f'{name}_weight' for name in model.feature_types]
+        metric_columns = [
+            'epoch', 'train_loss', 'val_ccc_v', 'val_ccc_a',
+            'val_ccc_d', 'val_ccc_avg', *gate_metric_names,
+        ]
         with open(metrics_file, 'w') as f:
-            f.write('epoch,train_loss,val_ccc_v,val_ccc_a,val_ccc_d,val_ccc_avg\n')
+            f.write(','.join(metric_columns) + '\n')
         
         for epoch in range(args.epochs):
             # Execute one training epoch
@@ -110,9 +116,18 @@ class TrainerExecutor:
             # Serialize optimizer parameters
             torch.save(optimizer.state_dict(), os.path.join(epoch_dir, 'optimizer.pt'))
             
-            # Append epoch metrics to tracking file
+            # Append epoch metrics and padding-free source gate weights.
+            metric_values = [
+                str(epoch + 1),
+                f'{train_loss:.4f}',
+                f'{val_v:.4f}',
+                f'{val_a:.4f}',
+                f'{val_d:.4f}',
+                f'{val_ccc_avg:.4f}',
+                *[f"{metrics[name]:.6f}" for name in gate_metric_names],
+            ]
             with open(metrics_file, 'a') as f:
-                f.write(f'{epoch+1},{train_loss:.4f},{val_v:.4f},{val_a:.4f},{val_d:.4f},{val_ccc_avg:.4f}\n')
+                f.write(','.join(metric_values) + '\n')
             
             logging.info(
                 f"Fold {fold+1}, Epoch {epoch+1:3d} | "
@@ -124,7 +139,9 @@ class TrainerExecutor:
             # Update best performing model state
             if val_ccc_avg > best_val_ccc:
                 best_val_ccc = val_ccc_avg
-                best_model = model.state_dict()
+                # state_dict() is shallow; copy tensors so later optimizer steps
+                # cannot mutate the stored best checkpoint in memory.
+                best_model = copy.deepcopy(model.state_dict())
                 # Serialize optimal model snapshot
                 best_model_dir = os.path.join(fold_dir, 'best_model')
                 os.makedirs(best_model_dir, exist_ok=True)
