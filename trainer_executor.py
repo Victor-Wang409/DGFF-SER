@@ -52,9 +52,10 @@ class TrainerExecutor:
             hidden_dim=1024,
             num_hidden_layers=4,
             num_groups=8,
-            # Assign zero to disable supplementary feature dimensions
-            wav2vec_dim=0,
-            data2vec_dim=0
+            # All feature extractors used by this project emit 1024-dimensional
+            # frame representations. A zero dimension disables an absent source.
+            wav2vec_dim=1024 if args.wav2vec_dir else 0,
+            data2vec_dim=1024 if args.data2vec_dir else 0
         )
 
         # Instantiate neural network

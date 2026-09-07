@@ -4,8 +4,8 @@
 
 DGFF-SER 是一个基于深度学习的高级情感语音分析系统，旨在预测语音在 Valence（愉悦度）、Arousal（激活度）和 Dominance（支配度）三个连续情感上的数值。
 
-*   **多特征融合**：支持同时输入 Emotion2Vec、HuBERT以及 Wav2Vec、Data2Vec（可选）等预训练模型提取的高维语音表征。
-*   **多粒度门控机制 (Multi-Grained Gating)**：将特征分割为多个独立的组，并使用引入了对数温度系数的Softmax门控网络自适应地计算跨模态重要性权重，最后结合双向 LSTM 捕获长程时序依赖。
+*   **多特征融合**：支持同时输入 Emotion2Vec、HuBERT 以及 Wav2Vec、Data2Vec（可选）等预训练模型提取的高维语音表征。
+*   **多粒度门控机制 (Multi-Grained Gating)**：将特征分割为多个独立的组，使用固定温度系数（默认 0.1）的 Softmax 门控网络自适应地计算各特征来源的重要性权重，在每个组内进行加权求和，最后结合双向 LSTM 捕获长程时序依赖。
 *   **双重目标优化**：
     *   **一致性相关系数损失 (CCC Loss)**：专门针对情感回归任务优化的指标级损失。
     *   **监督对比学习 (Supervised Contrastive Learning)**：通过非线性投影头，利用离散情感标签拉近同类样本的潜在空间距离，增强模型表征能力。
@@ -28,7 +28,7 @@ DGFF-SER 是一个基于深度学习的高级情感语音分析系统，旨在�
 ├── trainer_executor.py         # 统筹 Fold 级别生命周期、优化器与日志管理
 ├── trainer.py                  # 执行单轮训练与测试，实施精准的梯度裁剪
 ├── util.py                     # 提供不同数据集的动态划分算法
-├── UMAP.py										  # 高维特征降维与可视化工具
+├── UMAP.py						# 高维特征降维与可视化工具
 ├── config/                     # 项目配置文件目录
 ├── csv_files/                  # 存储各数据集的标注与元数据 CSV
 ├── extract_features/           # 调用各种预训练大模型提取底层特征的脚本集
@@ -42,7 +42,7 @@ DGFF-SER 是一个基于深度学习的高级情感语音分析系统，旨在�
 *   `main.py`: 程序的唯一入口。负责解析命令行参数、锁定全局随机种子以确保深度学习实验的严谨可复现性，并根据传入的 CSV 文件名动态选择数据集划分策略（例如自动识别 MSP-Podcast 或 IEMOCAP）。
 *   `dataset.py`: 提供 `EmotionDataset` 类。负责加载和配对多种 `.npy` 特征文件，利用 `ast.literal_eval` 安全解析字符串格式的 VAD 标签，并将不同采样率的特征通过严格的插值算法对齐到统一序列长度。
 *   `data_processor.py`: 提供 DataLoader 使用的 `collate_fn`。负责在组装 Batch 时动态计算最大长度，运用零填充将序列整理为规则张量，并生成对应的 Padding Mask。
-*   `model.py` & `model_components.py`: 模型主体。定义了带有多层 Transformer 编码器的 `VADModelWithGating`，以及确保数值稳定性的对数温度参数化多粒度特征融合网、注意力池化层和对比学习专属投影头。
+*   `model.py` & `model_components.py`: 模型主体。定义了带有多层 Transformer 编码器的 `VADModelWithGating`，以及采用固定温度 Softmax 和组内加权求和的多粒度特征融合网络、注意力池化层和对比学习专属投影头。
 *   `trainer.py` & `trainer_executor.py`: 模型训练。`trainer_executor.py` 管理的 epoch 循环、学习率步进与最佳模型保存；`trainer.py` 专注于微观计算，在反向传播与优化器更新之间实施关键的梯度裁剪，并计算损失。
 *   `loss_functions.py`: 提供计算相关性指标的 `CCCLoss。
 

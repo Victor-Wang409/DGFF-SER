@@ -24,6 +24,7 @@ class VADConfig(PretrainedConfig):
         use_multi_grained_gating=True,
         use_temporal_gating=True,
         num_groups=8,
+        gating_temperature=0.1,
         wav2vec_dim=0,         # wav2vec feature dimension where 0 indicates disabled
         data2vec_dim=0,       # data2vec feature dimension where 0 indicates disabled
         num_emotions=8,  # Number of discrete emotion categories defaulting to 8
@@ -43,6 +44,7 @@ class VADConfig(PretrainedConfig):
         self.use_multi_grained_gating = use_multi_grained_gating
         self.use_temporal_gating = use_temporal_gating
         self.num_groups = num_groups
+        self.gating_temperature = gating_temperature
         self.wav2vec_dim = wav2vec_dim
         self.data2vec_dim = data2vec_dim
         self.num_emotions = num_emotions
@@ -74,11 +76,13 @@ class VADModelWithGating(PreTrainedModel):
         # Apply enhanced gated feature fusion
         self.feature_fusion = ModelComponents.GatedFeatureFusion(
             feature_dims=feature_dims,
-            num_groups=config.num_groups
+            num_groups=config.num_groups,
+            temperature=config.gating_temperature
         )
         
-        # Calculate dimension after feature fusion
-        fusion_output_dim = config.emotion2vec_dim * 2
+        # Weighted-sum fusion has a fixed output size regardless of how many
+        # feature sources are active. The bidirectional LSTM doubles it.
+        fusion_output_dim = self.feature_fusion.output_dim
         
         # Setup input projection layer dimension
         self.input_proj = nn.Linear(fusion_output_dim, config.hidden_dim)

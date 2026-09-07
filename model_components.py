@@ -135,7 +135,7 @@ class ModelComponents:
         Gated feature fusion mechanism
         Transforms multi grained and temporal processing into a serial pipeline
         """
-        def __init__(self, feature_dims, num_groups=16, dropout_rate=0.1):
+        def __init__(self, feature_dims, num_groups=16, dropout_rate=0.1, temperature=0.1):
             """
             Initialize gated feature fusion
             """
@@ -144,10 +144,12 @@ class ModelComponents:
             self.feature_dims = feature_dims
             self.num_features = len(self.feature_types)
             self.dropout_rate = dropout_rate
-            # Initialize fixed scalar temperature for gating softmax
-            self.temperature = 0.1
-            # Execute weight initialization
-            self._init_weights()
+
+            if temperature <= 0:
+                raise ValueError(f"Gating temperature must be positive, but got {temperature}")
+
+            # Keep the gating temperature fixed and move it with the module.
+            self.register_buffer("temperature", torch.tensor(float(temperature)))
             
             # Validate feature count criteria
             assert 2 <= self.num_features <= 4, f"Feature count must be between 2 and 4 but got {self.num_features}"
@@ -158,6 +160,12 @@ class ModelComponents:
             
             # Adopt first feature dimension as standard baseline
             self.standard_dim = list(feature_dims.values())[0]
+
+            if self.standard_dim % num_groups != 0:
+                raise ValueError(
+                    f"Standard feature dimension ({self.standard_dim}) must be divisible "
+                    f"by the number of groups ({num_groups})"
+                )
             
             # Create transformation and normalization layers for each feature
             for feat_type, dim in feature_dims.items():
@@ -185,7 +193,7 @@ class ModelComponents:
             
             # Temporal processing LSTM with dropout and enhanced initialization
             self.temporal_lstm = nn.LSTM(
-                input_size=self.standard_dim * self.num_features,
+                input_size=self.standard_dim,
                 hidden_size=self.standard_dim,
                 batch_first=True,
                 bidirectional=True,
@@ -193,10 +201,11 @@ class ModelComponents:
             )
             
             # Residual connection projection layer
-            self.residual_proj = nn.Linear(self.standard_dim * self.num_features, self.standard_dim * 2)
+            self.residual_proj = nn.Linear(self.standard_dim, self.standard_dim * 2)
             
             # Final fusion layer normalization
             self.final_norm = nn.LayerNorm(self.standard_dim * 2)
+            self.output_dim = self.standard_dim * 2
             
             # Reapply initialization
             self._init_weights()
@@ -224,10 +233,13 @@ class ModelComponents:
             
         def forward(self, features):
             """
-            Forward propagation through fusion layers
+            Fuse aligned frame-level feature sequences.
+
+            Every input tensor must have shape ``[B, T, feature_dim]`` and
+            share the same batch and temporal dimensions. Group-wise softmax
+            gates weight the feature sources, and each group is aggregated by
+            summation before the groups are concatenated back to ``standard_dim``.
             """
-            batch_size, seq_len, _ = features[self.feature_types[0]].shape
-            
             # 1. Feature normalization and transformation
             transformed_features = {}
             for feat_type in self.feature_types:
@@ -239,8 +251,7 @@ class ModelComponents:
             multi_grained_features = []
             gate_weights = {feat_type: [] for feat_type in self.feature_types}
 
-            # Enforce strict positivity via exponential activation preventing saturation gradients
-            current_temp = torch.exp(self.log_temp)
+            current_temp = self.temperature.clamp_min(1e-6)
             
             for i in range(self.num_groups):
                 # Extract features for current group slice
@@ -258,7 +269,9 @@ class ModelComponents:
                 # Apply temperature scaled softmax to improve numerical stability
                 group_gates = F.softmax(group_logits / current_temp, dim=-1)
                 
-                # Multiply features by corresponding gate weights
+                # Apply the modality gates and aggregate each group by weighted sum.
+                # The group output keeps the fixed shape [B, T, group_size],
+                # independent of the number of input feature sources.
                 weighted_feats = []
                 for j, feat_type in enumerate(self.feature_types):
                     weight = group_gates[..., j:j+1]
@@ -266,8 +279,7 @@ class ModelComponents:
                     weighted_feat = group_feats[j] * weight
                     weighted_feats.append(weighted_feat)
                 
-                # Concatenate weighted features
-                group_feature = torch.cat(weighted_feats, dim=-1)
+                group_feature = torch.stack(weighted_feats, dim=0).sum(dim=0)
                 multi_grained_features.append(group_feature)
             
             # Concatenate features across all groups
@@ -293,14 +305,7 @@ class ModelComponents:
             
         def get_fusion_weights(self):
             """
-            Retrieve currently utilized gating fusion strategy weights
+            Dynamic fusion weights depend on the current input and are returned by
+            ``forward``. There is no single set of global fusion weights.
             """
-            return {
-                "grain_weight": 0.5,
-                "temporal_weight": 0.5
-            } weights
-            """
-            return {
-                "grain_weight": 0.5,
-                "temporal_weight": 0.5
-            }
+            return None
